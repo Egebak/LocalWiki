@@ -9,6 +9,7 @@ LocalWiki is a local, browser-based Markdown wiki for personal documentation. It
 - Link pages with `[[Page title]]` or `[[Page title|link text]]`, and see backlinks.
 - Search pages and navigate headings with the table of contents.
 - Add images to the workspace's `Assets` folder.
+- Choose an optional background image for each workspace; the default is plain.
 - Detect external file changes and offer a choice when an open page has conflicting edits.
 - Rebuild a read-only HTML site in `Published` after changes. That site can be copied or opened without running LocalWiki.
 
@@ -28,6 +29,8 @@ MyDocs/
 └── Published/             # Generated static HTML site
     └── index.html
 ```
+
+Background images chosen in the app are copied to `.wiki/backgrounds` and the selection is saved in `.wiki/appearance.json`. No background image is bundled with LocalWiki.
 
 Markdown in `Pages` is the source of truth for page content. The separate navigation file controls the sidebar, so moving a page in the tree does not move or rename its Markdown file. Renaming a page changes its display title and keeps the old title as a wiki-link alias. LocalWiki watches workspace files for edits made by other tools.
 
@@ -66,3 +69,7 @@ You need the .NET 10 SDK, Node.js, and npm to build. From the repository root in
 The distribution is written to `artifacts\publish\win-x64`. Copy **the whole folder** when moving the app to another Windows computer. That computer does not need Node.js or a separate .NET runtime. Build output is intentionally excluded from Git; the GitHub repository contains the source and build scripts.
 
 LocalWiki uses .NET 10, Blazor Interactive Server, Markdig, Milkdown/Crepe, SortableJS, and local filesystem storage.
+
+## License
+
+LocalWiki is licensed under the [MIT License](LICENSE). Keep the copyright and license notice when redistributing the source or a published build.

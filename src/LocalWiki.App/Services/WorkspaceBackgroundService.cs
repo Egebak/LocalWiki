@@ -13,7 +13,7 @@ public sealed class WorkspaceBackgroundService(WorkspaceService workspace)
     }
 
     public BackgroundDocument Data { get; private set; } = new();
-    public string? BackgroundUrl => Data.Selected == "none" ? null : Data.Selected == "starfield" ? "/images/starfield.jpg" : Data.Images.Any(image => image.Id == Data.Selected) ? BackgroundUrlFor(Data.Selected) : null;
+    public string? BackgroundUrl => Data.Selected == "none" ? null : Data.Images.Any(image => image.Id == Data.Selected) ? BackgroundUrlFor(Data.Selected) : null;
     public static string BackgroundUrlFor(string id) => "/app-background/" + Uri.EscapeDataString(id);
 
     private string SettingsPath => Path.Combine(workspace.Wiki, "appearance.json");
@@ -26,13 +26,14 @@ public sealed class WorkspaceBackgroundService(WorkspaceService workspace)
         catch (Exception) { Data = new(); }
         Data.Selected ??= "none";
         Data.Images ??= [];
+        if (Data.Selected == "starfield") Data.Selected = "none";
     }
 
     public void Reset() => Data = new();
 
     public void SelectBackground(string id)
     {
-        if (id is not ("none" or "starfield") && !Data.Images.Any(image => image.Id == id)) throw new ArgumentException("Unknown background.", nameof(id));
+        if (id != "none" && !Data.Images.Any(image => image.Id == id)) throw new ArgumentException("Unknown background.", nameof(id));
         var previous = Data.Selected;
         Data.Selected = id;
         try { Save(); }

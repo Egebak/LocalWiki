@@ -134,8 +134,13 @@ public sealed class CoreTests
             Assert.Null(backgrounds.BackgroundUrl);
             Assert.Empty(backgrounds.Data.Images);
             Assert.Null(backgrounds.ResolveBackground(id));
-            backgrounds.SelectBackground("starfield");
-            Assert.Equal("/images/starfield.jpg", backgrounds.BackgroundUrl);
+            File.WriteAllText(Path.Combine(workspace.Wiki, "appearance.json"), "{\"selected\":\"starfield\",\"images\":[]}");
+            backgrounds.Load();
+            Assert.Equal("none", backgrounds.Data.Selected);
+            Assert.Null(backgrounds.BackgroundUrl);
+            Assert.Throws<ArgumentException>(() => backgrounds.SelectBackground("starfield"));
+            await backgrounds.AddBackgroundAsync("galaxy.png", new MemoryStream([137, 80, 78, 71, 13, 10, 26, 10]));
+            Assert.NotEqual(id, backgrounds.Data.Selected);
 
             workspace.Open(Path.Combine(root, "project-a"));
             backgrounds.Load();

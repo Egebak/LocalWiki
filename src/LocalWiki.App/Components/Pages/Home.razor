@@ -131,7 +131,6 @@ else
         @if (backgroundError is not null) { <p class="error">@backgroundError</p> }
         <div class="background-options">
             <button type="button" class="background-option @(Backgrounds.Data.Selected == "none" ? "selected" : "")" @onclick='() => SelectBackground("none")'><span class="plain-preview"></span><span>Plain</span></button>
-            <button type="button" class="background-option @(Backgrounds.Data.Selected == "starfield" ? "selected" : "")" @onclick='() => SelectBackground("starfield")'><img src="/images/starfield.jpg" alt="" /><span>Starfield</span></button>
             @foreach (var image in Backgrounds.Data.Images)
             {
                 <button type="button" class="background-option @(Backgrounds.Data.Selected == image.Id ? "selected" : "")" @onclick="() => SelectBackground(image.Id)"><img src="@WorkspaceBackgroundService.BackgroundUrlFor(image.Id)" alt="" /><span title="@image.Name">@image.Name</span></button>
