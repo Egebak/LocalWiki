@@ -13,6 +13,7 @@
 @inject WikiLinkService Links
 @inject SearchService Search
 @inject SettingsService Settings
+@inject WorkspaceBackgroundService Backgrounds
 @inject AssetService AssetStore
 @inject NavigationManager Router
 @inject IJSRuntime JS
@@ -44,7 +45,7 @@
 }
 else
 {
-    <div class="app-shell document-layout">
+    <div class="app-shell document-layout @(Backgrounds.BackgroundUrl is null ? "" : "has-background")" style="@BackgroundStyle">
         <aside class="sidebar">
             <div class="brand">LocalWiki</div>
             <div class="workspace-name">@Workspace.Name</div>
@@ -63,16 +64,18 @@ else
             {
                 <div class="unlisted"><h3>Unlisted pages</h3>@foreach (var slug in unlisted) { <button @onclick="() => AddUnlisted(slug)">＋ @slug</button> }</div>
             }
-            <div class="sidebar-footer"><button @onclick="Rebuild">Rebuild Published Docs</button><button @onclick="SwitchWorkspace">Switch workspace</button></div>
+            <div class="sidebar-footer"><button @onclick="OpenBackgroundDialog">Background…</button><button @onclick="Rebuild">Rebuild Published Docs</button><button @onclick="SwitchWorkspace">Switch workspace</button></div>
         </aside>
-        <main class="page-main document-page">
+        <main class="page-main document-page @(Backgrounds.BackgroundUrl is null ? "" : "has-background")">
             @if (Engine.LastError is not null) { <div class="notice error">@Engine.LastError</div> }
             @if (error is not null) { <div class="notice error">@error <button @onclick="() => error = null">×</button></div> }
             @if (current is null) { <div class="empty-page"><h1>Welcome to @Workspace.Name</h1><p>Select a page or create one.</p><button class="primary" @onclick="() => ShowNew(null)">New page</button></div> }
             else
             {
-                <div class="breadcrumbs">@foreach (var crumb in Navigation.Breadcrumb(current.Id)) { <a href="@($"/pages/{crumb.Slug}")">@crumb.Title</a><span>›</span> }</div>
-                <header class="page-header"><div class="page-heading"><h1>@current.Title</h1><p>@if (OperatingSystem.IsWindows()) { <button type="button" class="file-path" title="Open containing folder in File Explorer" @onclick="OpenFileFolder">@Files.PathFor(current.Slug)</button> } else { <span class="file-path-text">@Files.PathFor(current.Slug)</span> } @if (dirty) { <span class="dirty">• Unsaved changes</span> }</p></div><div class="mode-controls"><button class="@(mode == "view" ? "selected" : "")" @onclick='() => SetMode("view")'>Read Only</button><button class="@(mode == "visual" ? "selected" : "")" @onclick='() => SetMode("visual")'>Visual</button><button class="@(mode == "source" ? "selected" : "")" @onclick='() => SetMode("source")'>Markdown</button></div></header>
+                <div class="page-top">
+                    <div class="breadcrumbs">@foreach (var crumb in Navigation.Breadcrumb(current.Id)) { <a href="@($"/pages/{crumb.Slug}")">@crumb.Title</a><span>›</span> }</div>
+                    <header class="page-header"><div class="page-heading"><h1>@current.Title</h1><p>@if (OperatingSystem.IsWindows()) { <button type="button" class="file-path" title="Open containing folder in File Explorer" @onclick="OpenFileFolder">@Files.PathFor(current.Slug)</button> } else { <span class="file-path-text">@Files.PathFor(current.Slug)</span> } @if (dirty) { <span class="dirty">• Unsaved changes</span> }</p></div><div class="mode-controls"><button class="@(mode == "view" ? "selected" : "")" @onclick='() => SetMode("view")'>Read Only</button><button class="@(mode == "visual" ? "selected" : "")" @onclick='() => SetMode("visual")'>Visual</button><button class="@(mode == "source" ? "selected" : "")" @onclick='() => SetMode("source")'>Markdown</button></div></header>
+                </div>
                 @if (conflict)
                 {
                     <div class="notice conflict"><strong>This file changed on disk.</strong> Your unsaved version is still in the editor.<div><button @onclick="ReloadDisk">Reload disk version</button><button @onclick="ForceSave">Keep editor version</button><button @onclick="() => compare = !compare">Compare</button></div></div>
@@ -120,6 +123,26 @@ else
     </div>
 }
 
+@if (backgroundDialog)
+{
+    <div class="dialog-backdrop"><div class="dialog background-dialog">
+        <h2>Document background</h2>
+        <p>Choose a background for this workspace. The hierarchy panel keeps its solid color.</p>
+        @if (backgroundError is not null) { <p class="error">@backgroundError</p> }
+        <div class="background-options">
+            <button type="button" class="background-option @(Backgrounds.Data.Selected == "none" ? "selected" : "")" @onclick='() => SelectBackground("none")'><span class="plain-preview"></span><span>Plain</span></button>
+            <button type="button" class="background-option @(Backgrounds.Data.Selected == "starfield" ? "selected" : "")" @onclick='() => SelectBackground("starfield")'><img src="/images/starfield.jpg" alt="" /><span>Starfield</span></button>
+            @foreach (var image in Backgrounds.Data.Images)
+            {
+                <button type="button" class="background-option @(Backgrounds.Data.Selected == image.Id ? "selected" : "")" @onclick="() => SelectBackground(image.Id)"><img src="@WorkspaceBackgroundService.BackgroundUrlFor(image.Id)" alt="" /><span title="@image.Name">@image.Name</span></button>
+            }
+        </div>
+        <label class="background-upload">Add an image <InputFile OnChange="UploadBackground" accept=".jpg,.jpeg,.png,.webp,.gif" /></label>
+        <p>JPG, PNG, WebP, or GIF, up to 20 MB. Images are stored in this workspace’s .wiki folder.</p>
+        <div class="dialog-actions"><button @onclick="CloseBackgroundDialog">Done</button></div>
+    </div></div>
+}
+
 @if (dialog is not null)
 {
     <div class="dialog-backdrop"><div class="dialog"><h2>@(dialog == "new" ? "New page" : dialog == "rename" ? "Rename page" : "Delete page")</h2>
@@ -142,6 +165,8 @@ else
     private RenderedPage? rendered;
     private string markdown = "", savedMarkdown = "", diskVersion = "", mode = "view", workspacePath = "", query = "", dialogTitle = "", dialogParent = "";
     private string? error, dialog;
+    private string? backgroundError;
+    private bool backgroundDialog;
     private WikiPageNode? dialogNode;
     private bool dirty, missing, conflict, compare, deleteSubtree, editorOpen, needsEditor;
     private int deleteBacklinkCount;
@@ -152,6 +177,7 @@ else
     private IJSObjectReference? module;
     private IJSObjectReference? outlineModule;
     private DotNetObjectReference<Home>? dotRef;
+    private string? BackgroundStyle => Backgrounds.BackgroundUrl is { } url ? $"--wiki-background-image: url('{url}')" : null;
 
     protected override void OnInitialized() => Engine.Changed += ExternalChanged;
     protected override void OnParametersSet()
@@ -198,7 +224,25 @@ else
         catch (Exception ex) { error = ex.Message; }
     }
     private void RemoveRecent(string path) { Settings.Remove(path); StateHasChanged(); }
-    private async Task SwitchWorkspace() { if (dirty && !await JS.InvokeAsync<bool>("confirm", "Discard unsaved changes?")) return; current = null; dirty = false; Engine.Close(); Router.NavigateTo("/"); }
+    private async Task SwitchWorkspace() { if (dirty && !await JS.InvokeAsync<bool>("confirm", "Discard unsaved changes?")) return; current = null; dirty = false; backgroundDialog = false; Engine.Close(); Router.NavigateTo("/"); }
+    private void OpenBackgroundDialog() { dialog = null; backgroundError = null; backgroundDialog = true; }
+    private void CloseBackgroundDialog() { backgroundDialog = false; backgroundError = null; }
+    private void SelectBackground(string id)
+    {
+        try { Backgrounds.SelectBackground(id); backgroundError = null; }
+        catch (Exception ex) { backgroundError = "Could not select background: " + ex.Message; }
+    }
+    private async Task UploadBackground(InputFileChangeEventArgs args)
+    {
+        try
+        {
+            var file = args.File;
+            await using var stream = file.OpenReadStream(20 * 1024 * 1024);
+            await Backgrounds.AddBackgroundAsync(file.Name, stream);
+            backgroundError = null;
+        }
+        catch (Exception ex) { backgroundError = "Could not add background: " + ex.Message; }
+    }
     private void ClearSearch() => query = "";
     private void Toggle(Guid id) { if (!collapsed.Add(id)) collapsed.Remove(id); }
     private void ShowNew(Guid? parent) { dialog = "new"; dialogNode = null; dialogTitle = ""; dialogParent = parent?.ToString() ?? current?.Id.ToString() ?? ""; }

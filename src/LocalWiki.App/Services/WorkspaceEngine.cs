@@ -2,7 +2,7 @@ using LocalWiki.App.Publishing;
 
 namespace LocalWiki.App.Services;
 
-public sealed class WorkspaceEngine(WorkspaceService workspace, NavigationService navigation, SearchService search, SettingsService settings, StaticPublisherService publisher, ILogger<WorkspaceEngine> logger) : IDisposable
+public sealed class WorkspaceEngine(WorkspaceService workspace, NavigationService navigation, SearchService search, SettingsService settings, WorkspaceBackgroundService backgrounds, StaticPublisherService publisher, ILogger<WorkspaceEngine> logger) : IDisposable
 {
     private readonly List<FileSystemWatcher> watchers = [];
     private Timer? debounce;
@@ -12,6 +12,7 @@ public sealed class WorkspaceEngine(WorkspaceService workspace, NavigationServic
     {
         StopWatchers();
         workspace.Open(path);
+        backgrounds.Load();
         navigation.Load();
         search.Rebuild();
         settings.Remember(workspace.Root);
@@ -22,7 +23,7 @@ public sealed class WorkspaceEngine(WorkspaceService workspace, NavigationServic
         Watch(workspace.Wiki, "navigation.json");
         Changed?.Invoke();
     }
-    public void Close() { StopWatchers(); workspace.Close(); Changed?.Invoke(); }
+    public void Close() { StopWatchers(); workspace.Close(); backgrounds.Reset(); Changed?.Invoke(); }
     public async Task PublishSafelyAsync()
     {
         try { await publisher.PublishAsync(); LastError = null; }

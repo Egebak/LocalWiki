@@ -113,6 +113,44 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public async Task Backgrounds_default_to_plain_and_stay_with_their_workspace()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "localwiki-background-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var workspace = new WorkspaceService();
+            workspace.Open(Path.Combine(root, "project-a"));
+            var backgrounds = new WorkspaceBackgroundService(workspace);
+            backgrounds.Load();
+            Assert.Null(backgrounds.BackgroundUrl);
+            await backgrounds.AddBackgroundAsync("nebula.png", new MemoryStream([137, 80, 78, 71, 13, 10, 26, 10]));
+            var id = backgrounds.Data.Selected;
+            Assert.Equal(WorkspaceBackgroundService.BackgroundUrlFor(id), backgrounds.BackgroundUrl);
+            Assert.StartsWith(workspace.Wiki, backgrounds.ResolveBackground(id)!.Value.Path);
+            Assert.Null(backgrounds.ResolveBackground("../settings.json"));
+
+            workspace.Open(Path.Combine(root, "project-b"));
+            backgrounds.Load();
+            Assert.Null(backgrounds.BackgroundUrl);
+            Assert.Empty(backgrounds.Data.Images);
+            Assert.Null(backgrounds.ResolveBackground(id));
+            backgrounds.SelectBackground("starfield");
+            Assert.Equal("/images/starfield.jpg", backgrounds.BackgroundUrl);
+
+            workspace.Open(Path.Combine(root, "project-a"));
+            backgrounds.Load();
+            Assert.Equal(id, backgrounds.Data.Selected);
+            Assert.Single(backgrounds.Data.Images);
+            backgrounds.SelectBackground("none");
+            backgrounds.Load();
+            Assert.Null(backgrounds.BackgroundUrl);
+            Assert.Single(backgrounds.Data.Images);
+            Assert.Throws<ArgumentException>(() => backgrounds.SelectBackground("unknown"));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public void Markdown_rendering_blocks_raw_html_and_unsafe_links()
     {
         using var test = new TestWiki();

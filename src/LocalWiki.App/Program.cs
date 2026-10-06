@@ -31,6 +31,7 @@ builder.Services.AddSingleton<MarkdownRenderService>();
 builder.Services.AddSingleton<SearchService>();
 builder.Services.AddSingleton<AssetService>();
 builder.Services.AddSingleton<SettingsService>();
+builder.Services.AddSingleton<WorkspaceBackgroundService>();
 builder.Services.AddSingleton<StaticPublisherService>();
 builder.Services.AddSingleton<WorkspaceEngine>();
 var app = builder.Build();
@@ -44,6 +45,11 @@ app.MapGet("/workspace-assets/{name}", (string name, WorkspaceService ws, AssetS
     if (!ws.IsOpen) return Results.NotFound();
     var file = assets.Resolve(name);
     return file is null ? Results.NotFound() : Results.File(file.Value.Path, file.Value.Type);
+});
+app.MapGet("/app-background/{id}", (string id, WorkspaceBackgroundService backgrounds) =>
+{
+    var image = backgrounds.ResolveBackground(id);
+    return image is null ? Results.NotFound() : Results.File(image.Value.Path, image.Value.ContentType);
 });
 app.MapStaticAssets();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
