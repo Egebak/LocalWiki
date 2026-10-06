@@ -17,5 +17,5 @@ public sealed class WikiPageNode
 
 public sealed record PageSnapshot(string Markdown, string Hash, DateTime ModifiedUtc);
 public sealed record SearchHit(string Slug, string Title, string Breadcrumb, string Excerpt);
-public sealed record HeadingLink(string Id, string Text, int Level);
+public sealed record HeadingLink(string Id, string Text, int Level, int Line);
 public sealed record RenderedPage(string Html, IReadOnlyList<HeadingLink> Headings);

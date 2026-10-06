@@ -28,7 +28,7 @@ public sealed class MarkdownRenderService(WikiLinkService links)
                 var baseId = id; var n = 2;
                 while (!ids.Add(id)) id = baseId + "-" + n++;
                 heading.GetAttributes().Id = id;
-                headings.Add(new(id, text, heading.Level));
+                headings.Add(new(id, text, heading.Level, heading.Line));
             }
             RewriteLinks(block, published);
         }

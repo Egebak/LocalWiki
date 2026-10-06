@@ -4,6 +4,7 @@
 @using LocalWiki.App.Models
 @using LocalWiki.App.Services
 @using System.Net
+@using System.Diagnostics
 @inject WorkspaceService Workspace
 @inject WorkspaceEngine Engine
 @inject NavigationService Navigation
@@ -43,7 +44,7 @@
 }
 else
 {
-    <div class="app-shell">
+    <div class="app-shell document-layout">
         <aside class="sidebar">
             <div class="brand">LocalWiki</div>
             <div class="workspace-name">@Workspace.Name</div>
@@ -64,31 +65,58 @@ else
             }
             <div class="sidebar-footer"><button @onclick="Rebuild">Rebuild Published Docs</button><button @onclick="SwitchWorkspace">Switch workspace</button></div>
         </aside>
-        <main class="page-main">
+        <main class="page-main document-page">
             @if (Engine.LastError is not null) { <div class="notice error">@Engine.LastError</div> }
             @if (error is not null) { <div class="notice error">@error <button @onclick="() => error = null">×</button></div> }
             @if (current is null) { <div class="empty-page"><h1>Welcome to @Workspace.Name</h1><p>Select a page or create one.</p><button class="primary" @onclick="() => ShowNew(null)">New page</button></div> }
             else
             {
                 <div class="breadcrumbs">@foreach (var crumb in Navigation.Breadcrumb(current.Id)) { <a href="@($"/pages/{crumb.Slug}")">@crumb.Title</a><span>›</span> }</div>
-                <header class="page-header"><div><h1>@current.Title</h1><p>@(current.Slug).md @if (dirty) { <span class="dirty">• Unsaved changes</span> }</p></div><div class="mode-controls"><button class="@(mode == "view" ? "selected" : "")" @onclick='() => SetMode("view")'>View</button><button class="@(mode == "visual" ? "selected" : "")" @onclick='() => SetMode("visual")'>Visual</button><button class="@(mode == "source" ? "selected" : "")" @onclick='() => SetMode("source")'>Markdown</button></div></header>
+                <header class="page-header"><div class="page-heading"><h1>@current.Title</h1><p>@if (OperatingSystem.IsWindows()) { <button type="button" class="file-path" title="Open containing folder in File Explorer" @onclick="OpenFileFolder">@Files.PathFor(current.Slug)</button> } else { <span class="file-path-text">@Files.PathFor(current.Slug)</span> } @if (dirty) { <span class="dirty">• Unsaved changes</span> }</p></div><div class="mode-controls"><button class="@(mode == "view" ? "selected" : "")" @onclick='() => SetMode("view")'>Read Only</button><button class="@(mode == "visual" ? "selected" : "")" @onclick='() => SetMode("visual")'>Visual</button><button class="@(mode == "source" ? "selected" : "")" @onclick='() => SetMode("source")'>Markdown</button></div></header>
                 @if (conflict)
                 {
                     <div class="notice conflict"><strong>This file changed on disk.</strong> Your unsaved version is still in the editor.<div><button @onclick="ReloadDisk">Reload disk version</button><button @onclick="ForceSave">Keep editor version</button><button @onclick="() => compare = !compare">Compare</button></div></div>
                     @if (compare) { <div class="compare"><pre>@markdown</pre><pre>@diskVersion</pre></div> }
                 }
-                @if (missing)
-                {
-                    <div class="notice"><p>Markdown file missing.</p><button @onclick="RecreateMissing">Recreate file</button><button @onclick="RemoveMissing">Remove navigation entry</button></div>
-                }
-                else if (mode == "view") { <article class="markdown-body">@((MarkupString)(rendered?.Html ?? ""))</article> }
-                else if (mode == "source") { <textarea class="source-editor" @bind="markdown" @bind:event="oninput" @bind:after="SourceChanged" spellcheck="false"></textarea> }
-                else { <div class="visual-editor" @ref="editorElement"></div> }
-                @if (mode != "view") { <div class="editor-footer"><button class="primary" @onclick="Save">Save page <kbd>Ctrl+S</kbd></button><span>Markdown is saved directly to Pages/@(current.Slug).md</span></div> }
-                @if (mode == "view" && Links.Backlinks(current.Slug, Files) is { Count: > 0 } backlinks) { <section class="backlinks"><h2>Referenced by</h2>@foreach (var b in backlinks) { <a href="@($"/pages/{b.Slug}")">@b.Title</a> }</section> }
+                <div class="page-workspace">
+                    <div class="page-document">
+                        @if (missing)
+                        {
+                            <div class="notice"><p>Markdown file missing.</p><button @onclick="RecreateMissing">Recreate file</button><button @onclick="RemoveMissing">Remove navigation entry</button></div>
+                        }
+                        else if (mode == "view")
+                        {
+                            <div class="document-stage"><article class="document-sheet markdown-body"><div class="document-content">@((MarkupString)(rendered?.Html ?? ""))</div></article></div>
+                        }
+                        else if (mode == "source") { <div class="document-stage"><div class="document-sheet source-sheet"><textarea class="source-editor" @bind="markdown" @bind:event="oninput" @bind:after="SourceChanged" spellcheck="false"></textarea></div></div> }
+                        else { <div class="document-stage visual-editor" @ref="editorElement"></div> }
+                        @if (mode == "view" && Links.Backlinks(current.Slug, Files) is { Count: > 0 } backlinks) { <section class="backlinks"><h2>Referenced by</h2>@foreach (var b in backlinks) { <a href="@($"/pages/{b.Slug}")">@b.Title</a> }</section> }
+                    </div>
+                    @if (!missing)
+                    {
+                        <aside class="page-tools" aria-label="Page tools">
+                            @if (mode != "view")
+                            {
+                                <div class="save-panel"><button class="primary" @onclick="Save">Save page <kbd>Ctrl+S</kbd></button><p>Saved directly to Pages/@(current.Slug).md</p></div>
+                            }
+                            <nav class="page-outline" aria-label="On this page">
+                                <h2>On this page</h2>
+                                @if (rendered is { Headings.Count: > 0 })
+                                {
+                                    @for (var i = 0; i < rendered.Headings.Count; i++)
+                                    {
+                                        var heading = rendered.Headings[i];
+                                        var index = i;
+                                        <button type="button" style="padding-left: @((heading.Level - 1) * 12)px" @onclick="() => JumpToHeading(heading, index)">@heading.Text</button>
+                                    }
+                                }
+                                else { <p>No headings yet</p> }
+                            </nav>
+                        </aside>
+                    }
+                </div>
             }
         </main>
-        <aside class="toc"><div>On this page</div>@if (mode == "view" && rendered is not null) { @foreach (var heading in rendered.Headings) { <a href="@($"#{heading.Id}")" style="padding-left: @((heading.Level - 1) * 12)px">@heading.Text</a> } }</aside>
     </div>
 }
 
@@ -122,6 +150,7 @@ else
     private int attachedTreeRevision = -1;
     private ElementReference editorElement;
     private IJSObjectReference? module;
+    private IJSObjectReference? outlineModule;
     private DotNetObjectReference<Home>? dotRef;
 
     protected override void OnInitialized() => Engine.Changed += ExternalChanged;
@@ -238,10 +267,15 @@ else
         }
         mode = next;
         if (next == "visual") needsEditor = true;
-        if (next == "view") rendered = Renderer.Render(markdown, false);
+        rendered = Renderer.Render(markdown, false);
         StateHasChanged();
     }
-    private void SourceChanged() => dirty = markdown != savedMarkdown;
+    private void SourceChanged() { dirty = markdown != savedMarkdown; rendered = Renderer.Render(markdown, false); }
+    private async Task JumpToHeading(HeadingLink heading, int index)
+    {
+        outlineModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/pageOutline.js");
+        await outlineModule.InvokeVoidAsync("jumpToHeading", mode, index, heading.Id, heading.Line);
+    }
     private async Task Save() => await SaveCore(false);
     private async Task ForceSave() => await SaveCore(true);
     private async Task SaveCore(bool force)
@@ -265,6 +299,20 @@ else
         LoadPage(current.Slug); StateHasChanged();
     }
     private async Task Rebuild() => await Engine.PublishSafelyAsync();
+    private void OpenFileFolder()
+    {
+        if (current is null || !OperatingSystem.IsWindows()) return;
+        try
+        {
+            var folder = Path.GetDirectoryName(Files.PathFor(current.Slug))!;
+            var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+            var start = new ProcessStartInfo(explorer) { UseShellExecute = true };
+            start.ArgumentList.Add(folder);
+            Process.Start(start);
+            error = null;
+        }
+        catch (Exception ex) { error = "Could not open the file folder: " + ex.Message; }
+    }
     private async Task ConfirmNavigation(LocationChangingContext context)
     {
         if (dirty && !await JS.InvokeAsync<bool>("confirm", "Discard unsaved changes?")) context.PreventNavigation();
@@ -277,7 +325,7 @@ else
         treeRevision++;
         await InvokeAsync(StateHasChanged);
     }
-    [JSInvokable] public Task OnEditorChanged(string value) => InvokeAsync(() => { markdown = WikiLinkService.NormalizeVisualMarkdown(value); dirty = markdown != savedMarkdown; StateHasChanged(); });
+    [JSInvokable] public Task OnEditorChanged(string value) => InvokeAsync(() => { markdown = WikiLinkService.NormalizeVisualMarkdown(value); dirty = markdown != savedMarkdown; rendered = Renderer.Render(markdown, false); StateHasChanged(); });
     [JSInvokable] public async Task<string> UploadImage(string name, string base64)
     {
         var url = AssetStore.Save(name, Convert.FromBase64String(base64));
@@ -308,5 +356,5 @@ else
         }
         StateHasChanged();
     });
-    public void Dispose() { Engine.Changed -= ExternalChanged; dotRef?.Dispose(); if (module is not null) _ = module.DisposeAsync(); }
+    public void Dispose() { Engine.Changed -= ExternalChanged; dotRef?.Dispose(); if (module is not null) _ = module.DisposeAsync(); if (outlineModule is not null) _ = outlineModule.DisposeAsync(); }
 }
