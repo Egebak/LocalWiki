@@ -1,0 +1,312 @@
+@page "/"
+@page "/pages/{Slug}"
+@page "/new"
+@using LocalWiki.App.Models
+@using LocalWiki.App.Services
+@using System.Net
+@inject WorkspaceService Workspace
+@inject WorkspaceEngine Engine
+@inject NavigationService Navigation
+@inject MarkdownFileService Files
+@inject MarkdownRenderService Renderer
+@inject WikiLinkService Links
+@inject SearchService Search
+@inject SettingsService Settings
+@inject AssetService AssetStore
+@inject NavigationManager Router
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>@(current?.Title ?? "LocalWiki")</PageTitle>
+<NavigationLock OnBeforeInternalNavigation="ConfirmNavigation" ConfirmExternalNavigation="@dirty" />
+
+@if (!Workspace.IsOpen)
+{
+    <div class="chooser">
+        <div class="brand">LocalWiki</div>
+        <h1>Your documentation, on disk.</h1>
+        <p>Open an existing documentation directory or create a new workspace.</p>
+        <form @onsubmit="OpenWorkspace" @onsubmit:preventDefault>
+            <label for="workspace-path">Workspace directory</label>
+            <div class="chooser-input"><input id="workspace-path" @bind="workspacePath" placeholder="C:\Projects\Documentation" /><button class="primary" type="submit">Open workspace</button></div>
+        </form>
+        @if (Settings.Data.RecentWorkspaces.Count > 0)
+        {
+            <h2>Recent workspaces</h2>
+            @foreach (var path in Settings.Data.RecentWorkspaces)
+            {
+                <div class="recent"><button @onclick="() => OpenPath(path)">@path</button><button title="Remove from recent list" @onclick="() => RemoveRecent(path)">×</button></div>
+            }
+        }
+        @if (error is not null) { <p class="error">@error</p> }
+    </div>
+}
+else
+{
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="brand">LocalWiki</div>
+            <div class="workspace-name">@Workspace.Name</div>
+            <div class="sidebar-tools"><input id="wiki-search" class="search-input" @bind="query" @bind:event="oninput" placeholder="Search pages…  Ctrl+K" /><button title="New page" @onclick="() => ShowNew(null)">＋</button></div>
+            @if (!string.IsNullOrWhiteSpace(query))
+            {
+                <div class="search-results">
+                @foreach (var hit in Search.Search(query)) { <a href="@($"/pages/{hit.Slug}")" @onclick="ClearSearch"><strong>@hit.Title</strong><small>@hit.Breadcrumb</small><span>@hit.Excerpt</span></a> }
+                </div>
+            }
+            <nav class="tree" id="wiki-tree" @key="treeRevision">
+                <TreeNode Nodes="Navigation.Document.Nodes" CurrentId="current?.Id" Collapsed="collapsed" OnToggle="Toggle" OnNewChild="NewChild" OnRename="ShowRename" OnDelete="ShowDelete" />
+            </nav>
+            @{ var unlisted = Files.Slugs().Where(s => Navigation.FindSlug(s) is null).ToList(); }
+            @if (unlisted.Count > 0)
+            {
+                <div class="unlisted"><h3>Unlisted pages</h3>@foreach (var slug in unlisted) { <button @onclick="() => AddUnlisted(slug)">＋ @slug</button> }</div>
+            }
+            <div class="sidebar-footer"><button @onclick="Rebuild">Rebuild Published Docs</button><button @onclick="SwitchWorkspace">Switch workspace</button></div>
+        </aside>
+        <main class="page-main">
+            @if (Engine.LastError is not null) { <div class="notice error">@Engine.LastError</div> }
+            @if (error is not null) { <div class="notice error">@error <button @onclick="() => error = null">×</button></div> }
+            @if (current is null) { <div class="empty-page"><h1>Welcome to @Workspace.Name</h1><p>Select a page or create one.</p><button class="primary" @onclick="() => ShowNew(null)">New page</button></div> }
+            else
+            {
+                <div class="breadcrumbs">@foreach (var crumb in Navigation.Breadcrumb(current.Id)) { <a href="@($"/pages/{crumb.Slug}")">@crumb.Title</a><span>›</span> }</div>
+                <header class="page-header"><div><h1>@current.Title</h1><p>@(current.Slug).md @if (dirty) { <span class="dirty">• Unsaved changes</span> }</p></div><div class="mode-controls"><button class="@(mode == "view" ? "selected" : "")" @onclick='() => SetMode("view")'>View</button><button class="@(mode == "visual" ? "selected" : "")" @onclick='() => SetMode("visual")'>Visual</button><button class="@(mode == "source" ? "selected" : "")" @onclick='() => SetMode("source")'>Markdown</button></div></header>
+                @if (conflict)
+                {
+                    <div class="notice conflict"><strong>This file changed on disk.</strong> Your unsaved version is still in the editor.<div><button @onclick="ReloadDisk">Reload disk version</button><button @onclick="ForceSave">Keep editor version</button><button @onclick="() => compare = !compare">Compare</button></div></div>
+                    @if (compare) { <div class="compare"><pre>@markdown</pre><pre>@diskVersion</pre></div> }
+                }
+                @if (missing)
+                {
+                    <div class="notice"><p>Markdown file missing.</p><button @onclick="RecreateMissing">Recreate file</button><button @onclick="RemoveMissing">Remove navigation entry</button></div>
+                }
+                else if (mode == "view") { <article class="markdown-body">@((MarkupString)(rendered?.Html ?? ""))</article> }
+                else if (mode == "source") { <textarea class="source-editor" @bind="markdown" @bind:event="oninput" @bind:after="SourceChanged" spellcheck="false"></textarea> }
+                else { <div class="visual-editor" @ref="editorElement"></div> }
+                @if (mode != "view") { <div class="editor-footer"><button class="primary" @onclick="Save">Save page <kbd>Ctrl+S</kbd></button><span>Markdown is saved directly to Pages/@(current.Slug).md</span></div> }
+                @if (mode == "view" && Links.Backlinks(current.Slug, Files) is { Count: > 0 } backlinks) { <section class="backlinks"><h2>Referenced by</h2>@foreach (var b in backlinks) { <a href="@($"/pages/{b.Slug}")">@b.Title</a> }</section> }
+            }
+        </main>
+        <aside class="toc"><div>On this page</div>@if (mode == "view" && rendered is not null) { @foreach (var heading in rendered.Headings) { <a href="@($"#{heading.Id}")" style="padding-left: @((heading.Level - 1) * 12)px">@heading.Text</a> } }</aside>
+    </div>
+}
+
+@if (dialog is not null)
+{
+    <div class="dialog-backdrop"><div class="dialog"><h2>@(dialog == "new" ? "New page" : dialog == "rename" ? "Rename page" : "Delete page")</h2>
+    @if (error is not null) { <p class="error">@error</p> }
+    @if (dialog == "new")
+    {
+        <label>Title<input @bind="dialogTitle" @bind:event="oninput" /></label><label>Place beneath<select @bind="dialogParent"><option value="">Root</option>@foreach (var n in Navigation.All()) { <option value="@n.Id">@string.Join(" › ", Navigation.Breadcrumb(n.Id).Select(c => c.Title))</option> }</select></label>
+        <div class="dialog-actions"><button @onclick="CloseDialog">Cancel</button><button class="primary" @onclick="CreatePage">Create page</button></div>
+    }
+    else if (dialog == "rename") { <label>Display title<input @bind="dialogTitle" /></label><p>The Markdown filename stays the same. The old title becomes a wiki-link alias.</p><div class="dialog-actions"><button @onclick="CloseDialog">Cancel</button><button class="primary" @onclick="RenamePage">Rename</button></div> }
+    else { <p>Referenced by @deleteBacklinkCount other page(s).</p>@if (dialogNode?.Children.Count > 0) { <label><input type="radio" name="delete-mode" checked="@(!deleteSubtree)" @onchange="() => deleteSubtree = false" /> Delete only this page and promote its children</label><label><input type="radio" name="delete-mode" checked="@deleteSubtree" @onchange="() => deleteSubtree = true" /> Delete this page and its entire subtree</label> }<div class="dialog-actions"><button @onclick="CloseDialog">Cancel</button><button class="danger" @onclick="DeletePage">Delete page</button></div> }
+    </div></div>
+}
+
+@code {
+    [Parameter] public string? Slug { get; set; }
+    [SupplyParameterFromQuery(Name = "title")] public string? NewTitle { get; set; }
+    private WikiPageNode? current;
+    private PageSnapshot? snapshot;
+    private RenderedPage? rendered;
+    private string markdown = "", savedMarkdown = "", diskVersion = "", mode = "view", workspacePath = "", query = "", dialogTitle = "", dialogParent = "";
+    private string? error, dialog;
+    private WikiPageNode? dialogNode;
+    private bool dirty, missing, conflict, compare, deleteSubtree, editorOpen, needsEditor;
+    private int deleteBacklinkCount;
+    private readonly HashSet<Guid> collapsed = [];
+    private int treeRevision;
+    private int attachedTreeRevision = -1;
+    private ElementReference editorElement;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<Home>? dotRef;
+
+    protected override void OnInitialized() => Engine.Changed += ExternalChanged;
+    protected override void OnParametersSet()
+    {
+        if (!Workspace.IsOpen) return;
+        if (Router.Uri.Split('?', 2)[0].EndsWith("/new", StringComparison.OrdinalIgnoreCase)) { ShowNew(null); dialogTitle = NewTitle ?? ""; return; }
+        var wanted = Slug ?? Navigation.FindSlug("index")?.Slug ?? Navigation.Document.Nodes.FirstOrDefault()?.Slug;
+        if (wanted != current?.Slug) LoadPage(wanted);
+    }
+    private void LoadPage(string? slug)
+    {
+        current = slug is null ? null : Navigation.FindSlug(slug);
+        snapshot = current is null ? null : Files.Read(current.Slug);
+        missing = current is not null && snapshot is null;
+        savedMarkdown = snapshot?.Markdown ?? "";
+        markdown = savedMarkdown; dirty = false; conflict = false; compare = false; mode = "view"; editorOpen = false; needsEditor = false;
+        rendered = current is null ? null : Renderer.Render(markdown, false);
+        if (current is not null) foreach (var ancestor in Navigation.Breadcrumb(current.Id)) collapsed.Remove(ancestor.Id);
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (module is null)
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wikiInterop.js");
+            dotRef = DotNetObjectReference.Create(this);
+            await module.InvokeVoidAsync("setup", dotRef);
+        }
+        if (Workspace.IsOpen && attachedTreeRevision != treeRevision)
+        {
+            await module.InvokeVoidAsync("attachTree", dotRef);
+            attachedTreeRevision = treeRevision;
+        }
+        if (needsEditor && mode == "visual")
+        {
+            needsEditor = false;
+            await module.InvokeVoidAsync("createEditor", editorElement, markdown, dotRef);
+            editorOpen = true;
+        }
+    }
+    private async Task OpenWorkspace() => await OpenPath(workspacePath);
+    private async Task OpenPath(string path)
+    {
+        try { await Engine.OpenAsync(path); treeRevision++; error = null; LoadPage(Navigation.FindSlug("index")?.Slug ?? Navigation.Document.Nodes.FirstOrDefault()?.Slug); Router.NavigateTo(current is null ? "/" : "/pages/" + current.Slug); }
+        catch (Exception ex) { error = ex.Message; }
+    }
+    private void RemoveRecent(string path) { Settings.Remove(path); StateHasChanged(); }
+    private async Task SwitchWorkspace() { if (dirty && !await JS.InvokeAsync<bool>("confirm", "Discard unsaved changes?")) return; current = null; dirty = false; Engine.Close(); Router.NavigateTo("/"); }
+    private void ClearSearch() => query = "";
+    private void Toggle(Guid id) { if (!collapsed.Add(id)) collapsed.Remove(id); }
+    private void ShowNew(Guid? parent) { dialog = "new"; dialogNode = null; dialogTitle = ""; dialogParent = parent?.ToString() ?? current?.Id.ToString() ?? ""; }
+    private void NewChild(Guid id) => ShowNew(id);
+    private void ShowRename(Guid id) { dialogNode = Navigation.Find(id); dialogTitle = dialogNode?.Title ?? ""; dialog = "rename"; }
+    private void ShowDelete(Guid id) { dialogNode = Navigation.Find(id); deleteSubtree = false; deleteBacklinkCount = dialogNode is null ? 0 : Links.Backlinks(dialogNode.Slug, Files).Count; dialog = "delete"; }
+    private void CloseDialog() { dialog = null; dialogNode = null; }
+    private async Task CreatePage()
+    {
+        try
+        {
+            var title = dialogTitle.Trim();
+            var slug = MarkdownFileService.Slugify(title, Files.Slugs().Concat(Navigation.All().Select(n => n.Slug)));
+            var parent = Guid.TryParse(dialogParent, out var id) ? id : (Guid?)null;
+            Files.Create(slug, "# " + title + "\n\n");
+            try { Navigation.Add(title, slug, parent); }
+            catch { Files.Delete(slug); throw; }
+            treeRevision++; await Engine.ContentChangedAsync(); CloseDialog();
+            Router.NavigateTo("/pages/" + slug); LoadPage(slug); await SetMode("visual");
+        }
+        catch (Exception ex) { error = ex.Message; }
+    }
+    private async Task RenamePage()
+    {
+        if (dialogNode is null) return;
+        try { Navigation.Rename(dialogNode.Id, dialogTitle); treeRevision++; await Engine.ContentChangedAsync(); CloseDialog(); rendered = Renderer.Render(markdown, false); }
+        catch (Exception ex) { error = ex.Message; }
+    }
+    private async Task DeletePage()
+    {
+        if (dialogNode is null) return;
+        try
+        {
+            var deletingCurrent = current?.Id == dialogNode.Id || deleteSubtree && NavigationService.Flatten([dialogNode]).Any(n => n.Id == current?.Id);
+            var removed = Navigation.Remove(dialogNode.Id, deleteSubtree);
+            foreach (var node in removed) Files.Delete(node.Slug);
+            treeRevision++; await Engine.ContentChangedAsync(); CloseDialog();
+            if (deletingCurrent) { LoadPage(Navigation.FindSlug("index")?.Slug ?? Navigation.Document.Nodes.FirstOrDefault()?.Slug); Router.NavigateTo(current is null ? "/" : "/pages/" + current.Slug); }
+        }
+        catch (Exception ex) { error = ex.Message; }
+    }
+    private async Task AddUnlisted(string slug)
+    {
+        try { Navigation.Add(WorkspaceService.TitleFromSlug(slug), slug); treeRevision++; await Engine.ContentChangedAsync(); }
+        catch (Exception ex) { error = ex.Message; }
+    }
+    private async Task RecreateMissing()
+    {
+        if (current is null) return;
+        try { Files.Create(current.Slug, "# " + current.Title + "\n\n"); LoadPage(current.Slug); await Engine.ContentChangedAsync(); }
+        catch (Exception ex) { error = ex.Message; }
+    }
+    private async Task RemoveMissing()
+    {
+        if (current is null) return;
+        try { Navigation.Remove(current.Id, false); treeRevision++; await Engine.ContentChangedAsync(); LoadPage(Navigation.FindSlug("index")?.Slug); Router.NavigateTo(current is null ? "/" : "/pages/" + current.Slug); }
+        catch (Exception ex) { error = ex.Message; }
+    }
+    private async Task SetMode(string next)
+    {
+        if (mode == next) return;
+        if (mode == "visual" && editorOpen && module is not null)
+        {
+            markdown = WikiLinkService.NormalizeVisualMarkdown(await module.InvokeAsync<string>("getMarkdown"));
+            await module.InvokeVoidAsync("destroyEditor"); editorOpen = false;
+        }
+        mode = next;
+        if (next == "visual") needsEditor = true;
+        if (next == "view") rendered = Renderer.Render(markdown, false);
+        StateHasChanged();
+    }
+    private void SourceChanged() => dirty = markdown != savedMarkdown;
+    private async Task Save() => await SaveCore(false);
+    private async Task ForceSave() => await SaveCore(true);
+    private async Task SaveCore(bool force)
+    {
+        if (current is null) return;
+        try
+        {
+            if (mode == "visual" && editorOpen && module is not null) markdown = WikiLinkService.NormalizeVisualMarkdown(await module.InvokeAsync<string>("getMarkdown"));
+            snapshot = Files.Save(current.Slug, markdown, snapshot?.Hash, force);
+            savedMarkdown = markdown; dirty = false; conflict = false; compare = false; error = null;
+            rendered = Renderer.Render(markdown, false);
+            await Engine.ContentChangedAsync();
+        }
+        catch (IOException) { conflict = true; diskVersion = Files.Read(current.Slug)?.Markdown ?? ""; }
+        catch (Exception ex) { error = ex.Message; }
+    }
+    private async Task ReloadDisk()
+    {
+        if (current is null) return;
+        if (editorOpen && module is not null) { await module.InvokeVoidAsync("destroyEditor"); editorOpen = false; }
+        LoadPage(current.Slug); StateHasChanged();
+    }
+    private async Task Rebuild() => await Engine.PublishSafelyAsync();
+    private async Task ConfirmNavigation(LocationChangingContext context)
+    {
+        if (dirty && !await JS.InvokeAsync<bool>("confirm", "Discard unsaved changes?")) context.PreventNavigation();
+    }
+
+    [JSInvokable] public async Task OnMove(string id, string? parent, int index)
+    {
+        try { Navigation.Move(Guid.Parse(id), Guid.TryParse(parent, out var p) ? p : null, index); await Engine.ContentChangedAsync(); }
+        catch (Exception ex) { error = ex.Message; }
+        treeRevision++;
+        await InvokeAsync(StateHasChanged);
+    }
+    [JSInvokable] public Task OnEditorChanged(string value) => InvokeAsync(() => { markdown = WikiLinkService.NormalizeVisualMarkdown(value); dirty = markdown != savedMarkdown; StateHasChanged(); });
+    [JSInvokable] public async Task<string> UploadImage(string name, string base64)
+    {
+        var url = AssetStore.Save(name, Convert.FromBase64String(base64));
+        await Engine.ContentChangedAsync();
+        return url;
+    }
+    [JSInvokable] public async Task OnShortcut(string key)
+    {
+        if (key == "save" && mode != "view") await InvokeAsync(Save);
+        if (key == "search") await module!.InvokeVoidAsync("focusSearch");
+        if (key == "escape") await InvokeAsync(() => { CloseDialog(); query = ""; StateHasChanged(); });
+    }
+    private void ExternalChanged() => _ = InvokeAsync(() =>
+    {
+        treeRevision++;
+        if (current is not null)
+        {
+            current = Navigation.Find(current.Id);
+            if (current is not null)
+            {
+                var disk = Files.Read(current.Slug);
+                if (disk?.Hash != snapshot?.Hash)
+                {
+                    if (dirty) { conflict = true; diskVersion = disk?.Markdown ?? ""; }
+                    else LoadPage(current.Slug);
+                }
+            }
+        }
+        StateHasChanged();
+    });
+    public void Dispose() { Engine.Changed -= ExternalChanged; dotRef?.Dispose(); if (module is not null) _ = module.DisposeAsync(); }
+}

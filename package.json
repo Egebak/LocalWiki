@@ -1,0 +1,8 @@
+{
+  "name": "localwiki-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node Frontend/build.mjs" },
+  "dependencies": { "@milkdown/crepe": "^7.18.0", "sortablejs": "^1.15.6" },
+  "devDependencies": { "esbuild": "^0.25.0" }
+}

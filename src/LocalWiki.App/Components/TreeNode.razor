@@ -1,0 +1,30 @@
+@using LocalWiki.App.Models
+
+<ul class="sortable-list" data-parent="@(ParentId?.ToString() ?? "")">
+@foreach (var node in Nodes)
+{
+    <li class="tree-item" data-id="@node.Id" @key="node.Id">
+        <div class="tree-row @(CurrentId == node.Id ? "active" : "")">
+            <button class="tree-toggle" title="Expand or collapse" @onclick="() => OnToggle.InvokeAsync(node.Id)">@(node.Children.Count == 0 ? "·" : Collapsed.Contains(node.Id) ? "▸" : "▾")</button>
+            <a href="@($"/pages/{node.Slug}")" class="tree-link">@node.Title</a>
+            <button class="tree-actions" title="New child page" @onclick="() => OnNewChild.InvokeAsync(node.Id)">＋</button>
+            <button class="tree-actions" title="Rename page" @onclick="() => OnRename.InvokeAsync(node.Id)">✎</button>
+            <button class="tree-actions" title="Delete page" @onclick="() => OnDelete.InvokeAsync(node.Id)">⋯</button>
+        </div>
+        <div class="tree-children @(Collapsed.Contains(node.Id) ? "collapsed" : "")">
+            <TreeNode Nodes="node.Children" ParentId="node.Id" CurrentId="CurrentId" Collapsed="Collapsed" OnToggle="OnToggle" OnNewChild="OnNewChild" OnRename="OnRename" OnDelete="OnDelete" />
+        </div>
+    </li>
+}
+</ul>
+
+@code {
+    [Parameter] public IReadOnlyList<WikiPageNode> Nodes { get; set; } = [];
+    [Parameter] public Guid? ParentId { get; set; }
+    [Parameter] public Guid? CurrentId { get; set; }
+    [Parameter] public HashSet<Guid> Collapsed { get; set; } = [];
+    [Parameter] public EventCallback<Guid> OnToggle { get; set; }
+    [Parameter] public EventCallback<Guid> OnNewChild { get; set; }
+    [Parameter] public EventCallback<Guid> OnRename { get; set; }
+    [Parameter] public EventCallback<Guid> OnDelete { get; set; }
+}
